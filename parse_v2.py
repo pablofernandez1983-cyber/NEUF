@@ -136,7 +136,14 @@ def get_body(page_num, slot_idx):
     # página anterior — no al registro actual. Incluirla mezclaría cuerpos de
     # mensajes distintos y rompería la extracción del tema.
     main_val = slots[slot_idx]
-    next_val = slots[slot_idx + 1] if slot_idx + 1 < len(slots) else None
+    # Fin del record: el MENOR offset de slot válido mayor que el inicio.
+    # El directory puede estar desordenado y tener entradas borradas (0xFFFF),
+    # así que slots[slot_idx+1] no sirve: en pág 3638 el slot 2 tenía 0xFFFF
+    # como "siguiente" y se leían 32KB cruzando páginas (mezclaba mensajes).
+    real_off = main_val & 0x7FFF
+    nexts = [s & 0x7FFF for s in slots
+             if real_off < (s & 0x7FFF) < PAGE_SIZE - 10]
+    next_val = min(nexts) if nexts else None
     return slot_text(page_num, main_val, next_val)
 
 # ── Parser de registros de metadatos ────────────────────────────────────────
