@@ -300,13 +300,27 @@ function termDir() {
 
   } else if (depth === 2 && TERM.path[0] === 'foros') {
     const grpId = TERM.path[1];
+    if (grpId === 'todos') {
+      if (!TERM.msgs.length) TERM.msgs = ALL.filter(m=>m.area&&!FOROS_EXCLUIR.has(m.area));
+      TERM.viewIdx = -1;
+      termListMsgs(TERM.msgs);
+      return;
+    }
     const subAreas = GROUPS[grpId];
     if (!subAreas) { termH(S(TC.err,'  Error: categoría no encontrada.')); return; }
+    const activas = subAreas.filter(ar => (AREA_BUCKETS[ar]||[]).length);
+    // foro sin subáreas reales (p.ej. hardware): saltear el nivel intermedio
+    // y listar los mensajes directo, sin el paso extra de una sola fila
+    if (activas.length === 1) {
+      TERM.msgs = AREA_BUCKETS[activas[0]] || [];
+      TERM.viewIdx = -1;
+      termListMsgs(TERM.msgs);
+      return;
+    }
     termH(' ' + S(TC.cy,'FORO                    ') + S(TC.cy,'MENSAJES  ') + S(TC.cy,'DESCRIPCION'));
     termH(' ' + SEP);
-    for (const area of subAreas) {
+    for (const area of activas) {
       const cnt = (AREA_BUCKETS[area]||[]).length;
-      if (!cnt) continue;
       const sub = area.split('/').slice(1).join('/') || area;
       dirRow(sub, cnt);
     }
