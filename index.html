@@ -195,6 +195,35 @@ function runCmd(cmd) {
   termExec(cmd);
 }
 const mbtn = (lbl, cmd) => `<span class="mbtn" onclick="runCmd('${cmd}')">${lbl}</span>`;
+
+// lista paginada en mobile: de a 100 mensajes con botón VER MÁS,
+// porque volcar miles de filas de una congela el celular
+const MOB_PAGE = 100;
+function renderMobChunk() {
+  const out = document.getElementById('term-output');
+  const old = document.getElementById('mob-more');
+  if (old) old.remove();
+  const anchor = out.children[out.children.length - 2];
+  const msgs = TERM.msgs;
+  const end = Math.min(TERM.shown + MOB_PAGE, msgs.length);
+  for (let j = TERM.shown; j < end; j++) {
+    const m = msgs[j];
+    termTap(' ' + S(TC.dim, String(j+1).padStart(4) + ' ') + S(TC.wh, esc(m.from)) +
+            S(TC.dim, ' → ') + S(TC.dim, esc(m.to)) +
+            S(TC.dim, '  ' + termDate(m)) + '\n     ' +
+            S(TC.cy, esc((m.subj||'').slice(0,38))), String(j+1));
+  }
+  TERM.shown = end;
+  const div = document.createElement('div');
+  div.id = 'mob-more';
+  div.innerHTML = ' ' + S(TC.cy, '─'.repeat(36)) + '\n' +
+    (end < msgs.length
+      ? ' <span class="mbtn" onclick="renderMobChunk()">▼ VER MÁS</span>' +
+        S(TC.dim, ` ${end} de ${msgs.length} · tocá uno para leerlo`)
+      : ' ' + S(TC.dim, `${msgs.length} mensajes · tocá uno para leerlo`));
+  out.appendChild(div);
+  if (anchor) anchor.scrollIntoView();
+}
 function termPrompt() {
   const parts = ['NEUF', ...TERM.path];
   document.getElementById('term-prompt').textContent = parts.join('/') + '>';
@@ -313,16 +342,9 @@ function termListMsgs(msgs) {
       `<span class="mbtn"${TERM.sort===sortKeys[c]?' style="color:#ffff55"':''} onclick="runCmd('SORT ${c}')">${c}</span>`
     ).join(''));
     termH(' ' + S(TC.cy, '─'.repeat(36)));
-    sorted.forEach((m,j) => {
-      const n = String(j+1).padStart(4);
-      termTap(' ' + S(TC.dim, n + ' ') + S(TC.wh, esc(m.from)) +
-              S(TC.dim, ' → ') + S(TC.dim, esc(m.to)) +
-              S(TC.dim, '  ' + termDate(m)) + '\n     ' +
-              S(TC.cy, esc((m.subj||'').slice(0,38))), String(j+1));
-    });
-    termH(' ' + S(TC.cy, '─'.repeat(36)));
-    termH(' ' + S(TC.dim, `${msgs.length} mensajes · tocá uno para leerlo`));
     TERM.msgs = sorted;
+    TERM.shown = 0;
+    renderMobChunk();
     return;
   }
 
