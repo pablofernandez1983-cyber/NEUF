@@ -92,7 +92,18 @@ def slot_text(page_num, slot_val, next_val=None):
     if next_val is not None:
         abs_end = page_num * PAGE_SIZE + (next_val & 0x7FFF)
     else:
-        abs_end = page_num * PAGE_SIZE + PAGE_SIZE - 2
+        # Último slot: el uint16 en PAGE_SIZE-2*(n+1) (justo antes del slot
+        # directory) es el offset de fin de datos de la página. Verificado en
+        # 775/775 páginas: last_slot < free_ptr <= dir_start. Si no es válido,
+        # caer al inicio del directory para no leer la tabla como texto.
+        n = struct.unpack_from('<H', raw, page_num * PAGE_SIZE + 10)[0]
+        if 0 < n <= 500:
+            dir_start = PAGE_SIZE - 2 * (n + 1)
+            free_ptr = struct.unpack_from('<H', raw, page_num * PAGE_SIZE + dir_start)[0]
+            end_off = free_ptr if real_off < free_ptr <= dir_start else dir_start
+        else:
+            end_off = PAGE_SIZE - 2
+        abs_end = page_num * PAGE_SIZE + end_off
     chunk = raw[text_start:abs_end]
     # Limpiar basura binaria del inicio
     text = chunk.decode('cp850', errors='replace')
@@ -104,6 +115,8 @@ def slot_text(page_num, slot_val, next_val=None):
         if idx > 0:
             text = text[:idx].rstrip()
             break
+    # Quitar bytes de control sueltos al final (p.ej. terminador \x16 del record)
+    text = re.sub(r'[\x00-\x1f\x7f]+$', '', text)
     return text
 
 # ── Obtener body completo: slot_idx + posible continuación anterior ────────────
@@ -241,6 +254,21 @@ for m in PAT_READ.finditer(raw):
 print(f"Paso B (leídos): {len(messages) - cnt_a} mensajes nuevos (de {cnt_b_raw} candidatos)")
 
 print(f"Mensajes parseados: {len(messages)}")
+
+# ── Limpiar prefijo de voto en from_user ─────────────────────────────────────
+# En las áreas de votos, el byte 29 del registro binario ANTERIOR guarda el voto
+# (S/N/B). El regex lo absorbe como primera letra del from ("Npaz" → "paz").
+# Solo se quita si el resto es un usuario conocido (verificado: cero falsos
+# positivos — ningún usuario real arranca con mayúscula).
+known_users = {m['from_user'] for m in messages if m['from_user'][:1].islower()}
+known_users |= {m['to_user'] for m in messages}
+fixed_votes = 0
+for m in messages:
+    f_u = m['from_user']
+    if len(f_u) > 2 and f_u[0] in 'SNB' and f_u[1:] in known_users:
+        m['from_user'] = f_u[1:]
+        fixed_votes += 1
+print(f"Prefijos de voto corregidos: {fixed_votes}")
 
 # Ordenar por fecha
 messages.sort(key=lambda x: x['date'] or '99/99/9999')
