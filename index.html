@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NEUF v2.0 :: MP Online BBS 1997</title>
 <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
 <style>
@@ -37,6 +38,22 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
   font-size:16px;padding:1px 6px;display:flex;flex-shrink:0;flex-wrap:nowrap}
 .tb-key{background:#5555ff;color:#fff;padding:0 4px;margin-right:1px}
 .tb-lbl{color:#fff;padding:0 10px 0 2px}
+
+/* ── modo mobile (táctil) ── */
+.tap{cursor:pointer}
+.tap:active{background:#1a1a3a}
+.mbtn{background:#0000aa;color:#55ffff;padding:1px 8px;margin-right:6px;
+  cursor:pointer;display:inline-block;user-select:none}
+.mbtn:active{background:#5555ff}
+.tb-btn{background:#5555ff;color:#fff;border:none;font-family:'VT323',monospace;
+  font-size:18px;padding:4px 12px;margin:3px 5px 3px 0;cursor:pointer}
+.tb-btn:active{background:#55ffff;color:#0000aa}
+@media (max-width:700px){
+  #term-topbar{font-size:15px}
+  #term-topbar .t-sep{margin:0 4px}
+  #term-topbar .t-user{display:none}
+  #term-bottombar{flex-wrap:wrap;padding:2px 6px}
+}
 </style>
 </head>
 <body>
@@ -66,6 +83,9 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
 // ── constantes ───────────────────────────────────────────────────
 // Versión pública: solo foros (el correo privado no está en el dataset)
 const FOROS_EXCLUIR = new Set([]);
+
+// modo táctil: celular/tablet navega a tap, desktop queda igual
+const MOBILE = matchMedia('(pointer:coarse)').matches || innerWidth <= 700;
 
 // colores NEUF
 const TC = {
@@ -157,6 +177,24 @@ function termH(html) {
   out.scrollTop = out.scrollHeight;
 }
 function termClear() { document.getElementById('term-output').innerHTML = ''; }
+
+// línea tocable: ejecuta un comando al hacer tap (modo mobile)
+function termTap(html, cmd) {
+  const out = document.getElementById('term-output');
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  div.className = 'tap';
+  div.onclick = () => runCmd(cmd);
+  out.appendChild(div);
+  out.scrollTop = out.scrollHeight;
+}
+
+// ejecutar un comando como si se hubiera tipeado
+function runCmd(cmd) {
+  TERM.history.unshift(cmd); TERM.histIdx = -1;
+  termExec(cmd);
+}
+const mbtn = (lbl, cmd) => `<span class="mbtn" onclick="runCmd('${cmd}')">${lbl}</span>`;
 function termPrompt() {
   const parts = ['NEUF', ...TERM.path];
   document.getElementById('term-prompt').textContent = parts.join('/') + '>';
@@ -169,13 +207,20 @@ function termDate(m) {
 // ── pantalla de bienvenida ───────────────────────────────────────
 function termInit() {
   const B = 'background:#0000aa;color:#55ffff;padding:0 1px';
+  const LOGO = [
+    '  ███╗   ██╗███████╗██╗   ██╗███████╗  ',
+    '  ████╗  ██║██╔════╝██║   ██║██╔════╝  ',
+    '  ██╔██╗ ██║█████╗  ██║   ██║█████╗    ',
+    '  ██║╚██╗██║██╔══╝  ██║   ██║██╔══╝    ',
+    '  ██║ ╚████║███████╗╚██████╔╝██║       ',
+    '  ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝       ',
+  ];
   termH('');
-  termH('  <span style="'+B+'">  ███╗   ██╗███████╗██╗   ██╗███████╗  </span>');
-  termH('  <span style="'+B+'">  ████╗  ██║██╔════╝██║   ██║██╔════╝  </span>');
-  termH('  <span style="'+B+'">  ██╔██╗ ██║█████╗  ██║   ██║█████╗    </span>');
-  termH('  <span style="'+B+'">  ██║╚██╗██║██╔══╝  ██║   ██║██╔══╝    </span>');
-  termH('  <span style="'+B+'">  ██║ ╚████║███████╗╚██████╔╝██║       </span>');
-  termH('  <span style="'+B+'">  ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝       </span>');
+  if (MOBILE)
+    termH('  <span style="'+B+';font-size:13px;line-height:1.05;display:inline-block">' +
+          LOGO.join('\n') + '</span>');
+  else
+    LOGO.forEach(l => termH('  <span style="'+B+'">'+l+'</span>'));
   termH('');
   termH('  ' + S(TC.cy, 'Cualquier semejanza con EL BBS no es casualidad'));
   termH('');
@@ -183,7 +228,10 @@ function termInit() {
   termH('  ' + S(TC.red,'* ') + S(TC.wh,`${ALL.length.toLocaleString()} mensajes  ·  Buenos Aires  ·  Abr–Dic 1997`));
   termH('  ' + S(TC.red,'* ') + S(TC.wh,'Los detalles están en ') + S(TC.cy,'foros/neuf/info'));
   termH('');
-  termH('  ' + S(TC.dim,'Escribí ') + S(TC.cy,'DIR') + S(TC.dim,' para listar,  ') + S(TC.cy,'?') + S(TC.dim,' para ayuda.'));
+  if (MOBILE)
+    termH('  ' + S(TC.dim,'Tocá ') + mbtn('DIR','DIR') + S(TC.dim,' para listar los foros y navegá tocando.'));
+  else
+    termH('  ' + S(TC.dim,'Escribí ') + S(TC.cy,'DIR') + S(TC.dim,' para listar,  ') + S(TC.cy,'?') + S(TC.dim,' para ayuda.'));
   termH('');
   termPrompt();
 }
@@ -191,11 +239,13 @@ function termInit() {
 // ── listar directorio ────────────────────────────────────────────
 function termDir() {
   const depth = TERM.path.length;
-  const SEP = S(TC.cy, '─'.repeat(66));
+  const SEP = S(TC.cy, '─'.repeat(MOBILE ? 36 : 66));
 
   function dirRow(name, cnt, desc='') {
-    termH(' ' + S(TC.dim,'&lt;DIR&gt;') + '  ' + S(TC.wh, name.padEnd(22)) +
-          S(TC.wh, String(cnt).padStart(6)) + '  ' + S(TC.dim, desc));
+    const html = ' ' + S(TC.dim,'&lt;DIR&gt;') + '  ' + S(TC.wh, name.padEnd(22)) +
+          S(TC.wh, String(cnt).padStart(6)) + '  ' + S(TC.dim, desc);
+    if (MOBILE) termTap(html, 'CD ' + name);
+    else termH(html);
   }
 
   termH('');
@@ -256,6 +306,26 @@ function sortedMsgs(msgs) {
 function termListMsgs(msgs) {
   if (!msgs.length) { termH(' ' + S(TC.dim,'Sin mensajes.')); return; }
   const sorted = sortedMsgs(msgs);
+
+  if (MOBILE) {
+    const sortKeys = {FECHA:'date', DE:'from', PARA:'to', TEMA:'subj'};
+    termH(' ' + S(TC.dim,'ORDEN: ') + Object.keys(sortKeys).map(c =>
+      `<span class="mbtn"${TERM.sort===sortKeys[c]?' style="color:#ffff55"':''} onclick="runCmd('SORT ${c}')">${c}</span>`
+    ).join(''));
+    termH(' ' + S(TC.cy, '─'.repeat(36)));
+    sorted.forEach((m,j) => {
+      const n = String(j+1).padStart(4);
+      termTap(' ' + S(TC.dim, n + ' ') + S(TC.wh, esc(m.from)) +
+              S(TC.dim, ' → ') + S(TC.dim, esc(m.to)) +
+              S(TC.dim, '  ' + termDate(m)) + '\n     ' +
+              S(TC.cy, esc((m.subj||'').slice(0,38))), String(j+1));
+    });
+    termH(' ' + S(TC.cy, '─'.repeat(36)));
+    termH(' ' + S(TC.dim, `${msgs.length} mensajes · tocá uno para leerlo`));
+    TERM.msgs = sorted;
+    return;
+  }
+
   const arrow = '▲';
   const sortLabel = {date:'FECHA',from:'DE',to:'PARA',subj:'TEMA'}[TERM.sort];
   termH(' ' + S(TC.dim,' NRO') + '  ' +
@@ -282,7 +352,7 @@ function termListMsgs(msgs) {
 
 // ── leer mensaje ─────────────────────────────────────────────────
 function termPrintMsg(m, idx, total) {
-  const SEP = ' ' + S(TC.cy, '─'.repeat(66));
+  const SEP = ' ' + S(TC.cy, '─'.repeat(MOBILE ? 36 : 66));
   termH('');
   termH(' ' + S(TC.wh,'Leídos  : ') + S(TC.wh,String(idx)) +
         '    ' + S(TC.wh,'Nuevos : ') + S(TC.wh,String(total-idx)));
@@ -297,10 +367,13 @@ function termPrintMsg(m, idx, total) {
     termH(' ' + S(/^>/.test(ln)?TC.dim:TC.wh, esc(ln)));
   });
   termH(SEP);
-  termH(' ' + S(TC.cy,'N') + S(TC.dim,'=siguiente  ') +
-        S(TC.cy,'P') + S(TC.dim,'=anterior  ') +
-        S(TC.cy,'DIR') + S(TC.dim,'=lista  ') +
-        S(TC.cy,'CD..') + S(TC.dim,'=salir'));
+  if (MOBILE)
+    termH(' ' + mbtn('◀ ANT','P') + mbtn('SIG ▶','N') + mbtn('LISTA','DIR') + mbtn('SALIR','CD..'));
+  else
+    termH(' ' + S(TC.cy,'N') + S(TC.dim,'=siguiente  ') +
+          S(TC.cy,'P') + S(TC.dim,'=anterior  ') +
+          S(TC.cy,'DIR') + S(TC.dim,'=lista  ') +
+          S(TC.cy,'CD..') + S(TC.dim,'=salir'));
   termH('');
 }
 
@@ -510,6 +583,26 @@ document.addEventListener('keydown', e => {
   if (e.target.tagName==='INPUT') return;
   document.getElementById('term-input').focus();
 });
+
+// barra inferior con botones tocables (solo mobile; desktop conserva los atajos)
+function setupMobileBar() {
+  const bar = document.getElementById('term-bottombar');
+  bar.innerHTML = '';
+  const btn = (lbl, fn) => {
+    const b = document.createElement('button');
+    b.className = 'tb-btn'; b.textContent = lbl; b.onclick = fn;
+    bar.appendChild(b);
+  };
+  btn('DIR',    () => runCmd('DIR'));
+  btn('CD..',   () => runCmd('CD..'));
+  btn('BUSCAR', () => {
+    const i = document.getElementById('term-input');
+    i.value = 'BUSCAR '; i.focus();
+  });
+  btn('CLS',    () => runCmd('CLS'));
+  btn('?',      () => runCmd('?'));
+}
+if (MOBILE) setupMobileBar();
 
 init();
 </script>
