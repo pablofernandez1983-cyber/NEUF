@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>NEUF v2.0 :: MP Online BBS 1997</title>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#000;color:#fff;font-family:'VT323','Courier New',monospace;
+     height:100vh;display:flex;flex-direction:column;overflow:hidden}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 1px,
+    rgba(0,0,0,.10) 1px,rgba(0,0,0,.10) 2px)}
+
+#term-topbar{background:#aa0000;color:#fff;font-family:'VT323',monospace;
+  font-size:18px;padding:1px 10px;display:flex;justify-content:space-between;
+  align-items:center;flex-shrink:0;white-space:nowrap}
+#term-topbar .t-title{color:#ffff55;letter-spacing:3px;font-weight:bold}
+#term-topbar .t-sep{color:#ff7777;margin:0 8px}
+#term-topbar .t-user{color:#fff}
+
+#term-output{flex:1;overflow-y:auto;padding:4px 0 0;
+  white-space:pre-wrap;font-size:18px;color:#fff;font-family:'VT323',monospace;
+  word-break:break-word;line-height:1.3}
+#term-output div{padding:0 10px}
+#term-output::-webkit-scrollbar{width:6px}
+#term-output::-webkit-scrollbar-thumb{background:#333}
+
+#term-input-row{display:flex;align-items:center;padding:2px 10px;
+  background:#000;flex-shrink:0}
+#term-prompt{color:#fff;white-space:nowrap;margin-right:4px;font-size:18px;
+  font-family:'VT323',monospace}
+#term-input{flex:1;background:transparent;border:none;outline:none;
+  color:#fff;font-family:'VT323',monospace;font-size:18px;caret-color:#fff}
+
+#term-bottombar{background:#0000aa;color:#fff;font-family:'VT323',monospace;
+  font-size:16px;padding:1px 6px;display:flex;flex-shrink:0;flex-wrap:nowrap}
+.tb-key{background:#5555ff;color:#fff;padding:0 4px;margin-right:1px}
+.tb-lbl{color:#fff;padding:0 10px 0 2px}
+</style>
+</head>
+<body>
+
+<div id="term-topbar">
+  <span><span class="t-title">N E U F</span><span class="t-sep"> v2.80 ║ </span><span id="term-status">No Estás Usando el Fono</span></span>
+  <span class="t-user">Usuario: paz</span>
+</div>
+
+<div id="term-output"></div>
+
+<div id="term-input-row">
+  <span id="term-prompt">NEUF&gt;</span>
+  <input id="term-input" spellcheck="false" autocomplete="off" onkeydown="termKey(event)">
+</div>
+
+<div id="term-bottombar">
+  <span class="tb-key">?</span><span class="tb-lbl">Ayuda</span>
+  <span class="tb-key">DIR</span><span class="tb-lbl">Listar</span>
+  <span class="tb-key">CD</span><span class="tb-lbl">Entrar</span>
+  <span class="tb-key">BUSCAR</span><span class="tb-lbl">Buscar</span>
+  <span class="tb-key">CLS</span><span class="tb-lbl">Limpiar</span>
+  <span class="tb-key">VER</span><span class="tb-lbl">Info</span>
+</div>
+
+<script>
+// ── constantes ───────────────────────────────────────────────────
+// Versión pública: solo foros (el correo privado no está en el dataset)
+const FOROS_EXCLUIR = new Set([]);
+
+// colores NEUF
+const TC = {
+  wh:  'color:#ffffff',
+  cy:  'color:#55ffff',
+  yel: 'color:#ffff55',
+  dim: 'color:#aaaaaa',
+  red: 'color:#ff5555',
+  err: 'color:#ff5555',
+  am:  'color:#ffffff',
+  g0:  'color:#ffffff',
+  g1:  'color:#ffffff',
+  g2:  'color:#55ffff',
+};
+
+function S(style, text) { return `<span style="${style}">${text}</span>`; }
+const esc   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function firstLine(text) {
+  if (!text) return '(sin texto)';
+  const lines = text.split('\n').map(l=>l.trim())
+    .filter(l => l.length>4 && !/^[\x00-\x1f]/.test(l) && !/^[│╔═╗]/.test(l));
+  return (lines[0]||text.slice(0,50)).slice(0,60);
+}
+
+// ── estado global ────────────────────────────────────────────────
+let ALL = [];
+let AREA_BUCKETS = {};
+let GROUPS = {};
+
+const TERM = {
+  path: [],
+  msgs: [],
+  sort: 'date',   // 'date'|'from'|'to'|'subj'
+  viewIdx: -1,
+  history: [],
+  histIdx: -1,
+};
+
+// ── carga ────────────────────────────────────────────────────────
+async function init() {
+  termH(S(TC.dim, ' Cargando mensajes...'));
+  const res = await fetch('messages.json');
+  const raw = await res.json();
+  ALL = raw.map((m,i) => {
+    const from = m.from_user || '?';
+    const to   = m.to_user   || 'Todos';
+    const body = (m.body||'').trim();
+    let subj   = (m.subject||'').trim();
+    if (subj.length < 3 || /^\d+$/.test(subj) || subj === from)
+      subj = firstLine(body);
+    return { i, from, to, subj, date:m.date||'', body, area:m.area||'' };
+  });
+  AREA_BUCKETS = {};
+  for (const m of ALL) {
+    if (!m.area) continue;
+    if (!AREA_BUCKETS[m.area]) AREA_BUCKETS[m.area] = [];
+    AREA_BUCKETS[m.area].push(m);
+  }
+  GROUPS = {};
+  for (const area of Object.keys(AREA_BUCKETS)) {
+    if (FOROS_EXCLUIR.has(area)) continue;
+    const grp = area.split('/')[0];
+    if (!GROUPS[grp]) GROUPS[grp] = [];
+    GROUPS[grp].push(area);
+  }
+  for (const grp of Object.keys(GROUPS))
+    GROUPS[grp].sort((a,b)=>(AREA_BUCKETS[b]||[]).length-(AREA_BUCKETS[a]||[]).length);
+
+  termClear();
+  termInit();
+  document.getElementById('term-input').focus();
+  tick();
+}
+
+// ── reloj en barra superior ──────────────────────────────────────
+function tick() {
+  const d = new Date();
+  document.getElementById('term-status').textContent =
+    d.toTimeString().slice(0,8) + '  ' + d.toLocaleDateString('es-AR');
+  setTimeout(tick, 1000);
+}
+
+// ── terminal output ──────────────────────────────────────────────
+function termH(html) {
+  const out = document.getElementById('term-output');
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  out.appendChild(div);
+  out.scrollTop = out.scrollHeight;
+}
+function termClear() { document.getElementById('term-output').innerHTML = ''; }
+function termPrompt() {
+  const parts = ['NEUF', ...TERM.path];
+  document.getElementById('term-prompt').textContent = parts.join('/') + '>';
+}
+function termDate(m) {
+  if (!m.date) return '─────────────';
+  return m.date.slice(0,5) + ' ' + m.date.slice(11,16);
+}
+
+// ── pantalla de bienvenida ───────────────────────────────────────
+function termInit() {
+  const B = 'background:#0000aa;color:#55ffff;padding:0 1px';
+  termH('');
+  termH('  <span style="'+B+'">  ███╗   ██╗███████╗██╗   ██╗███████╗  </span>');
+  termH('  <span style="'+B+'">  ████╗  ██║██╔════╝██║   ██║██╔════╝  </span>');
+  termH('  <span style="'+B+'">  ██╔██╗ ██║█████╗  ██║   ██║█████╗    </span>');
+  termH('  <span style="'+B+'">  ██║╚██╗██║██╔══╝  ██║   ██║██╔══╝    </span>');
+  termH('  <span style="'+B+'">  ██║ ╚████║███████╗╚██████╔╝██║       </span>');
+  termH('  <span style="'+B+'">  ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝       </span>');
+  termH('');
+  termH('  ' + S(TC.cy, 'Cualquier semejanza con EL BBS no es casualidad'));
+  termH('');
+  termH('  ' + S(TC.red,'* ') + S(TC.wh,'Bienvenidos al archivo histórico de MP Online BBS'));
+  termH('  ' + S(TC.red,'* ') + S(TC.wh,`${ALL.length.toLocaleString()} mensajes  ·  Buenos Aires  ·  Abr–Dic 1997`));
+  termH('  ' + S(TC.red,'* ') + S(TC.wh,'Los detalles están en ') + S(TC.cy,'foros/neuf/info'));
+  termH('');
+  termH('  ' + S(TC.dim,'Escribí ') + S(TC.cy,'DIR') + S(TC.dim,' para listar,  ') + S(TC.cy,'?') + S(TC.dim,' para ayuda.'));
+  termH('');
+  termPrompt();
+}
+
+// ── listar directorio ────────────────────────────────────────────
+function termDir() {
+  const depth = TERM.path.length;
+  const SEP = S(TC.cy, '─'.repeat(66));
+
+  function dirRow(name, cnt, desc='') {
+    termH(' ' + S(TC.dim,'&lt;DIR&gt;') + '  ' + S(TC.wh, name.padEnd(22)) +
+          S(TC.wh, String(cnt).padStart(6)) + '  ' + S(TC.dim, desc));
+  }
+
+  termH('');
+  if (depth === 0) {
+    const nForo = ALL.filter(m => m.area && !FOROS_EXCLUIR.has(m.area)).length;
+    termH(' ' + S(TC.cy,'AREA                    ') + S(TC.cy,'MENSAJES  ') + S(TC.cy,'DESCRIPCION'));
+    termH(' ' + SEP);
+    dirRow('foros',   nForo, 'Foros de interés público');
+    termH(' ' + SEP);
+
+  } else if (depth === 1 && TERM.path[0] === 'foros') {
+    const grpOrder = Object.keys(GROUPS).sort(
+      (a,b) => GROUPS[b].reduce((s,ar)=>(AREA_BUCKETS[ar]||[]).length+s,0)
+              - GROUPS[a].reduce((s,ar)=>(AREA_BUCKETS[ar]||[]).length+s,0));
+    termH(' ' + S(TC.cy,'FORO                    ') + S(TC.cy,'MENSAJES  ') + S(TC.cy,'DESCRIPCION'));
+    termH(' ' + SEP);
+    dirRow('todos', ALL.filter(m=>m.area&&!FOROS_EXCLUIR.has(m.area)).length, 'Todos los foros');
+    for (const grp of grpOrder) {
+      const cnt = GROUPS[grp].reduce((s,ar)=>(AREA_BUCKETS[ar]||[]).length+s,0);
+      if (cnt) dirRow(grp, cnt);
+    }
+    termH(' ' + SEP);
+
+  } else if (depth === 2 && TERM.path[0] === 'foros') {
+    const grpId = TERM.path[1];
+    const subAreas = GROUPS[grpId];
+    if (!subAreas) { termH(S(TC.err,'  Error: categoría no encontrada.')); return; }
+    termH(' ' + S(TC.cy,'FORO                    ') + S(TC.cy,'MENSAJES  ') + S(TC.cy,'DESCRIPCION'));
+    termH(' ' + SEP);
+    for (const area of subAreas) {
+      const cnt = (AREA_BUCKETS[area]||[]).length;
+      if (!cnt) continue;
+      const sub = area.split('/').slice(1).join('/') || area;
+      dirRow(sub, cnt);
+    }
+    termH(' ' + SEP);
+
+  } else if (depth === 3 && TERM.path[0] === 'foros') {
+    termListMsgs(TERM.msgs);
+    return;
+  }
+  termH('');
+}
+
+// ── lista de mensajes ────────────────────────────────────────────
+function sortedMsgs(msgs) {
+  const s = TERM.sort;
+  return [...msgs].sort((a,b) => {
+    let va, vb;
+    if (s==='from') { va=a.from; vb=b.from; }
+    else if (s==='to') { va=a.to; vb=b.to; }
+    else if (s==='subj') { va=a.subj; vb=b.subj; }
+    else { va=a.date; vb=b.date; }
+    return va<vb?-1:va>vb?1:0;
+  });
+}
+
+function termListMsgs(msgs) {
+  if (!msgs.length) { termH(' ' + S(TC.dim,'Sin mensajes.')); return; }
+  const sorted = sortedMsgs(msgs);
+  const arrow = '▲';
+  const sortLabel = {date:'FECHA',from:'DE',to:'PARA',subj:'TEMA'}[TERM.sort];
+  termH(' ' + S(TC.dim,' NRO') + '  ' +
+        S(TERM.sort==='from'?TC.cy:TC.wh, 'DE        ') + '  ' +
+        S(TERM.sort==='to'  ?TC.cy:TC.wh, 'PARA      ') + '  ' +
+        S(TERM.sort==='date'?TC.cy:TC.wh, 'FECHA         ') +
+        S(TERM.sort==='subj'?TC.cy:TC.wh, 'TEMA'));
+  termH(' ' + S(TC.cy, '─'.repeat(70)));
+  sorted.forEach((m,j) => {
+    const n    = String(j+1).padStart(4);
+    const from = esc(m.from.slice(0,10).padEnd(10));
+    const to   = esc(m.to.slice(0,10).padEnd(10));
+    const fd   = termDate(m).padEnd(14);
+    const subj = esc((m.subj||'').slice(0,40));
+    termH(' ' + S(TC.dim,' '+n+'  ') + S(TC.wh,from) + '  ' +
+          S(TC.dim,to) + '  ' + S(TC.dim,fd) + S(TC.wh,subj));
+  });
+  termH(' ' + S(TC.cy, '─'.repeat(70)));
+  termH(' ' + S(TC.dim, `  ${msgs.length} mensajes  ·  `) +
+        S(TC.cy,'<número>') + S(TC.dim,' leer  ·  ') +
+        S(TC.cy,'SORT DE|PARA|FECHA|TEMA') + S(TC.dim,' ordenar'));
+  TERM.msgs = sorted;
+}
+
+// ── leer mensaje ─────────────────────────────────────────────────
+function termPrintMsg(m, idx, total) {
+  const SEP = ' ' + S(TC.cy, '─'.repeat(66));
+  termH('');
+  termH(' ' + S(TC.wh,'Leídos  : ') + S(TC.wh,String(idx)) +
+        '    ' + S(TC.wh,'Nuevos : ') + S(TC.wh,String(total-idx)));
+  termH('');
+  termH(' ' + S(TC.wh,'Mens.   : ') + S(TC.wh,String(idx+1)+'/'+total));
+  termH(' ' + S(TC.wh,'De      : ') + S(TC.wh,esc(m.from)));
+  termH(' ' + S(TC.wh,'A       : ') + S(TC.wh,esc(m.to)));
+  termH(' ' + S(TC.wh,'Tema    : ') + S(TC.wh,esc(m.subj||'(sin tema)')));
+  termH(' ' + S(TC.wh,'Fecha   : ') + S(TC.wh,m.date||''));
+  termH(SEP);
+  (m.body||'(sin cuerpo)').split('\n').forEach(ln => {
+    termH(' ' + S(/^>/.test(ln)?TC.dim:TC.wh, esc(ln)));
+  });
+  termH(SEP);
+  termH(' ' + S(TC.cy,'N') + S(TC.dim,'=siguiente  ') +
+        S(TC.cy,'P') + S(TC.dim,'=anterior  ') +
+        S(TC.cy,'DIR') + S(TC.dim,'=lista  ') +
+        S(TC.cy,'CD..') + S(TC.dim,'=salir'));
+  termH('');
+}
+
+// ── navegación CD ────────────────────────────────────────────────
+function termCd(arg) {
+  const depth = TERM.path.length;
+  const a = arg.toLowerCase().trim();
+
+  if (depth === 0) {
+    if (a==='foros'||a==='foro') { TERM.path=['foros']; TERM.msgs=[]; termDir(); }
+    else termH(' ' + S(TC.err,`'${arg}' no encontrado. Directorios: FOROS`));
+
+  } else if (depth===1 && TERM.path[0]==='foros') {
+    if (a==='todos') {
+      TERM.path.push('todos');
+      TERM.msgs=ALL.filter(m=>m.area&&!FOROS_EXCLUIR.has(m.area));
+      TERM.viewIdx=-1; termListMsgs(TERM.msgs);
+    } else if (GROUPS[a]) {
+      TERM.path.push(a); TERM.msgs=[]; termDir();
+    } else {
+      const names=Object.keys(GROUPS).map(g=>g.toUpperCase()).join(', ');
+      termH(' '+S(TC.err,`'${arg}' no encontrado. Grupos: ${names}`));
+    }
+
+  } else if (depth===2 && TERM.path[0]==='foros') {
+    const grpId=TERM.path[1];
+    const subAreas=grpId==='todos'?Object.keys(AREA_BUCKETS).filter(ar=>!FOROS_EXCLUIR.has(ar)):GROUPS[grpId];
+    if (!subAreas) { termH(' '+S(TC.err,'Error interno.')); return; }
+    const area=subAreas.find(ar=>{
+      const sub=ar.split('/').slice(1).join('/');
+      return sub===a||ar.endsWith('/'+a)||ar===a;
+    });
+    if (!area) {
+      const names=subAreas.filter(ar=>(AREA_BUCKETS[ar]||[]).length)
+        .map(ar=>ar.split('/').slice(1).join('/').toUpperCase()||ar.toUpperCase()).join(', ');
+      termH(' '+S(TC.err,`'${arg}' no encontrado. Foros: ${names}`));
+      return;
+    }
+    TERM.path.push(area.split('/').slice(1).join('/')||area);
+    TERM.msgs=AREA_BUCKETS[area]||[]; TERM.viewIdx=-1; termListMsgs(TERM.msgs);
+  }
+}
+
+// ── buscar ───────────────────────────────────────────────────────
+function termBuscar(q, extra) {
+  if (!q) { termH(' '+S(TC.err,'Uso: BUSCAR <texto>  [/de:<usuario>]  [/para:<usuario>]')); return; }
+  const ql = q.toLowerCase();
+
+  // parsear modificadores /de: y /para:
+  let filterDe='', filterPara='', filterArea='';
+  if (extra) {
+    const mDe   = extra.match(/\/de:(\S+)/i);
+    const mPara = extra.match(/\/para:(\S+)/i);
+    const mArea = extra.match(/\/area:(\S+)/i);
+    if (mDe)   filterDe   = mDe[1].toLowerCase();
+    if (mPara) filterPara = mPara[1].toLowerCase();
+    if (mArea) filterArea = mArea[1].toLowerCase();
+  }
+
+  const results = ALL.filter(m => {
+    if (filterDe   && !m.from.toLowerCase().includes(filterDe))   return false;
+    if (filterPara && !m.to.toLowerCase().includes(filterPara))   return false;
+    if (filterArea && !m.area.toLowerCase().includes(filterArea)) return false;
+    return (m.from+' '+m.to+' '+m.subj+' '+m.body).toLowerCase().includes(ql);
+  });
+
+  termH('');
+  if (!results.length) {
+    termH(' ' + S(TC.dim,`Sin resultados para "${q}"`));
+  } else {
+    termH(' ' + S(TC.cy,`Resultados para "${q}": `) + S(TC.wh, String(results.length)));
+    termH('');
+    TERM.msgs = results;
+    TERM.viewIdx = -1;
+    termListMsgs(results.slice(0, 500));
+    if (results.length > 500)
+      termH(' ' + S(TC.dim,`(mostrando 500 de ${results.length})`));
+  }
+}
+
+// ── ejecutar comando ─────────────────────────────────────────────
+function termExec(raw) {
+  if (!raw) { termPrompt(); return; }
+  const pathParts = ['NEUF', ...TERM.path];
+  termH(S(TC.wh, pathParts.join('/')+'>') + ' ' + S(TC.wh, esc(raw)));
+
+  // separar comando y args respetando el texto completo
+  const spaceIdx = raw.search(/\s/);
+  const cmd = (spaceIdx<0 ? raw : raw.slice(0,spaceIdx)).toLowerCase();
+  const arg = spaceIdx<0 ? '' : raw.slice(spaceIdx+1).trim();
+
+  // ── viendo un mensaje
+  if (TERM.viewIdx >= 0) {
+    if (cmd==='n'||cmd==='next')    { TERM.viewIdx=Math.min(TERM.viewIdx+1,TERM.msgs.length-1); termPrintMsg(TERM.msgs[TERM.viewIdx],TERM.viewIdx,TERM.msgs.length); }
+    else if (cmd==='p'||cmd==='prev') { TERM.viewIdx=Math.max(TERM.viewIdx-1,0); termPrintMsg(TERM.msgs[TERM.viewIdx],TERM.viewIdx,TERM.msgs.length); }
+    else if (cmd==='dir'||cmd==='ls') { TERM.viewIdx=-1; termDir(); }
+    else if (cmd==='cd..'||(cmd==='cd'&&arg==='..')) { TERM.viewIdx=-1; TERM.path.pop(); TERM.msgs=[]; termDir(); }
+    else if (/^\d+$/.test(cmd)) {
+      const n=parseInt(cmd)-1;
+      if (n>=0&&n<TERM.msgs.length) { TERM.viewIdx=n; termPrintMsg(TERM.msgs[n],n,TERM.msgs.length); }
+      else termH(' '+S(TC.err,'Número inválido.'));
+    } else termH(' '+S(TC.dim,'N=sig  P=ant  <número>  DIR  CD..'));
+    termPrompt(); return;
+  }
+
+  // ── comandos generales
+  if (cmd==='cls'||cmd==='clear')  { termClear(); termPrompt(); return; }
+  if (cmd==='ver')                 { termVer(); termPrompt(); return; }
+  if (cmd==='?'||cmd==='help')     { termHelp(); termPrompt(); return; }
+  if (cmd==='dir'||cmd==='ls')     { termDir(); termPrompt(); return; }
+
+  if (cmd==='cd'||cmd==='cd..') {
+    const cdArg = cmd==='cd..' ? '..' : arg;
+    if (!cdArg||cdArg==='/') { TERM.path=[]; TERM.msgs=[]; termDir(); }
+    else if (cdArg==='..') { if (TERM.path.length) TERM.path.pop(); TERM.msgs=[]; termDir(); }
+    else termCd(cdArg);
+    termPrompt(); return;
+  }
+
+  if (cmd==='sort') {
+    const campo = arg.toLowerCase();
+    const map = {de:'from',from:'from',para:'to',to:'to',fecha:'date',date:'date',tema:'subj',subj:'subj'};
+    if (!map[campo]) { termH(' '+S(TC.err,'SORT DE | PARA | FECHA | TEMA')); }
+    else {
+      TERM.sort = map[campo];
+      if (TERM.msgs.length) { termClear(); termListMsgs(TERM.msgs); }
+      else termH(' '+S(TC.dim,`Orden: ${campo.toUpperCase()}`));
+    }
+    termPrompt(); return;
+  }
+
+  if (cmd==='buscar'||cmd==='find'||cmd==='grep') {
+    // buscar "texto" /de:usuario /para:usuario
+    const firstSpace = arg.search(/\s+\//);
+    const texto = firstSpace<0 ? arg : arg.slice(0,firstSpace);
+    const extra = firstSpace<0 ? '' : arg.slice(firstSpace);
+    termBuscar(texto, extra);
+    termPrompt(); return;
+  }
+
+  // número directo en lista
+  if (/^\d+$/.test(cmd) && TERM.msgs.length) {
+    const n=parseInt(cmd)-1;
+    if (n>=0&&n<TERM.msgs.length) { TERM.viewIdx=n; termPrintMsg(TERM.msgs[n],n,TERM.msgs.length); }
+    else termH(' '+S(TC.err,'Número fuera de rango.'));
+    termPrompt(); return;
+  }
+
+  // intentar como CD
+  termCd(cmd);
+  termPrompt();
+}
+
+// ── teclado ──────────────────────────────────────────────────────
+function termKey(e) {
+  const inp = document.getElementById('term-input');
+  if (e.key==='Enter') {
+    const cmd=inp.value.trim(); inp.value='';
+    if (cmd) { TERM.history.unshift(cmd); TERM.histIdx=-1; }
+    termExec(cmd);
+  } else if (e.key==='ArrowUp') {
+    e.preventDefault();
+    TERM.histIdx=Math.min(TERM.histIdx+1,TERM.history.length-1);
+    inp.value=TERM.history[TERM.histIdx]||'';
+  } else if (e.key==='ArrowDown') {
+    e.preventDefault();
+    TERM.histIdx=Math.max(TERM.histIdx-1,-1);
+    inp.value=TERM.histIdx>=0?TERM.history[TERM.histIdx]:'';
+  }
+}
+
+// ── VER / HELP ───────────────────────────────────────────────────
+function termVer() {
+  termH('');
+  termH('  ' + S(TC.yel,'NEUF v2.80') + S(TC.dim,' — Lector offline MP Online BBS'));
+  termH('  ' + S(TC.dim,'Buenos Aires, Argentina — Archivo 1997'));
+  termH('  ' + S(TC.wh,ALL.length.toLocaleString()) + S(TC.dim,' mensajes en foros públicos  ·  ') +
+        S(TC.wh,Object.keys(AREA_BUCKETS).length.toLocaleString()) + S(TC.dim,' áreas'));
+  termH('');
+}
+
+function termHelp() {
+  const SEP = ' ' + S(TC.cy,'─'.repeat(52));
+  const row = (cmd,desc) => ' ' + S(TC.cy,'  ') + S(TC.wh,cmd.padEnd(22)) + S(TC.dim,desc);
+  termH('');
+  termH(' ' + S(TC.cy,'┌── COMANDOS ') + S(TC.cy,'─'.repeat(40) + '┐'));
+  termH(row('DIR',               'listar directorio actual'));
+  termH(row('CD <nombre>',       'entrar a carpeta o foro'));
+  termH(row('CD .. / CD..',      'subir un nivel'));
+  termH(row('<número>',          'leer mensaje'));
+  termH(row('N / P',             'siguiente / anterior mensaje'));
+  termH(row('SORT DE|PARA|FECHA|TEMA', 'ordenar lista actual'));
+  termH(row('BUSCAR <texto>',    'buscar en todos los mensajes'));
+  termH(row('BUSCAR x /de:paz',  'buscar con filtro de usuario'));
+  termH(row('BUSCAR x /area:dep','buscar en área específica'));
+  termH(row('VER',               'información del sistema'));
+  termH(row('CLS',               'limpiar pantalla'));
+  termH(' ' + S(TC.cy,'└' + '─'.repeat(52) + '┘'));
+  termH('');
+  termH('  ' + S(TC.dim,'Ej: ') + S(TC.cy,'CD foros') + S(TC.dim,' → ') +
+        S(TC.cy,'CD deportes') + S(TC.dim,' → ') +
+        S(TC.cy,'CD grandt') + S(TC.dim,' → ') + S(TC.cy,'1'));
+  termH('');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName==='INPUT') return;
+  document.getElementById('term-input').focus();
+});
+
+init();
+</script>
+</body>
+</html>
