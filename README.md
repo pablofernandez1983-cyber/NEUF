@@ -1,6 +1,6 @@
 # NEUF — Archivo histórico de MP Online BBS (1997)
 
-Lector web de **50.489 mensajes** de los foros de **MP Online**, un BBS de Buenos Aires,
+Lector web de **50.637 mensajes** de los foros de **MP Online**, un BBS de Buenos Aires,
 escritos entre abril y diciembre de 1997.
 
 Los mensajes fueron rescatados de una copia de **NEUF**, el lector offline del BBS
@@ -45,7 +45,7 @@ comunidad online pre-web.
 ## Archivos
 
 - `index.html` — la app (HTML/JS sin dependencias, fuente VT323)
-- `messages.json` — los 50.489 mensajes (30MB)
+- `messages.json` — los 50.637 mensajes (30MB)
 - `server.py` — servidor estático mínimo
 - `parse_v2.py` — el parser de Btrieve que extrajo los mensajes de `NEUFMSG.DAT`
 
