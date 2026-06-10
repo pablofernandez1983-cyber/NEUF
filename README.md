@@ -11,6 +11,10 @@ después fue parseada byte a byte para recuperar los mensajes.
 
 ## Cómo usarlo
 
+**Online:** https://pablofernandez1983-cyber.github.io/NEUF/
+
+O local:
+
 ```
 python server.py
 ```
